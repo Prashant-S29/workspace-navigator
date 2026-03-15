@@ -12,6 +12,7 @@ import os
 import subprocess
 import tkinter as tk
 from pathlib import Path
+from tkinter import font as tkfont
 from tkinter import ttk
 
 
@@ -304,6 +305,11 @@ class WorkspaceNavigator:
     # ---------------- OPEN FOLDER ---------------- #
 
     def on_enter(self, event=None):
+        # If a new folder input is active, confirm creation instead
+        if self.new_folder_entry is not None:
+            self.confirm_new_folder()
+            return "break"
+
         if not self.filtered_items:
             return "break"
 
@@ -361,22 +367,101 @@ class WorkspaceNavigator:
     # ---------------- NEW FOLDER ---------------- #
 
     def create_new_folder(self, event=None):
-        folder_name = "new-folder"
+        # Don't open a second input if one is already open
+        if self.new_folder_entry is not None:
+            return "break"
 
-        new_path = self.current_path / folder_name
+        # Insert a placeholder row at the top of the listbox
+        self.listbox.insert(0, "")
+        self.listbox.see(0)
 
-        i = 1
-        while new_path.exists():
-            new_path = self.current_path / f"{folder_name}-{i}"
-            i += 1
+        # Calculate the row height from the listbox font
+        row_height = (
+            tkfont.Font(font=self.listbox.cget("font")).metrics("linespace") + 6
+        )
 
-        new_path.mkdir()
+        # Overlay an Entry widget on top of that first row
+        self.new_folder_entry = tk.Entry(
+            self.listbox,
+            bg="#1e3a52",
+            fg="#ffffff",
+            insertbackground="#ffffff",
+            font=("Consolas", 11),
+            relief=tk.FLAT,
+            highlightthickness=1,
+            highlightcolor="#007acc",
+            highlightbackground="#007acc",
+        )
 
+        self.new_folder_entry.place(x=2, y=2, relwidth=1, width=-4, height=row_height)
+        self.new_folder_entry.insert(0, "📂 ")
+        self.new_folder_entry.icursor(tk.END)
+        self.new_folder_entry.focus_set()
+
+        # Bind keys ONLY on the entry widget — not on root
+        self.new_folder_entry.bind(
+            "<Return>", lambda e: (self.confirm_new_folder(), "break")
+        )
+        self.new_folder_entry.bind("<Escape>", lambda e: self.cancel_new_folder())
+
+        # Block root-level <Return> from firing while input is open
+        self.root.bind("<Return>", lambda e: "break")
+
+        return "break"
+
+    def confirm_new_folder(self):
+        if self.new_folder_entry is None:
+            return
+
+        raw = self.new_folder_entry.get()
+
+        # Strip the folder emoji prefix we inserted
+        folder_name = raw.replace("📂 ", "").replace("📂", "").strip()
+
+        self._cleanup_new_folder_entry()
+
+        if folder_name:
+            new_path = self.current_path / folder_name
+            try:
+                new_path.mkdir(parents=False, exist_ok=False)
+            except FileExistsError:
+                pass  # folder already exists, silently ignore
+            except Exception as e:
+                print(f"Could not create folder: {e}")
+
+        self._restore_enter_binding()
         self.load_current_directory()
+        self.search_entry.focus_set()
+
+    def cancel_new_folder(self):
+        self._cleanup_new_folder_entry()
+        self._restore_enter_binding()
+        self.load_current_directory()
+        self.search_entry.focus_set()
+
+    def _restore_enter_binding(self):
+        self.root.bind("<Return>", self.on_enter)
+
+    def _cleanup_new_folder_entry(self):
+        if self.new_folder_entry is not None:
+            self.new_folder_entry.destroy()
+            self.new_folder_entry = None
+        # Remove the placeholder row we inserted at index 0
+        try:
+            self.listbox.delete(0)
+        except Exception:
+            pass
 
     # ---------------- BACK ---------------- #
 
     def go_back(self, event=None):
+        # If folder input is active, let Backspace work normally inside it
+        if (
+            self.new_folder_entry is not None
+            and self.new_folder_entry.focus_get() == self.new_folder_entry
+        ):
+            return  # don't intercept
+
         if self.history:
             self.current_path = self.history.pop()
 
